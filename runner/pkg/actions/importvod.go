@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/url"
 	"os"
 	"os/exec"
@@ -165,10 +166,34 @@ func importVOD(ctx context.Context, logger *slog.Logger, notify chan *protobuf.N
 				Stream:        &protobuf.StreamInfo{Id: ptr.Take(streamID)},
 				StreamVersion: ptr.Take(protobuf.StreamVersion(protobuf.StreamVersion_value[streamVersion])),
 				Url:           ptr.Take(vodURL),
+				Chapters:      vodChapters(probe.Chapters()),
 			},
 		},
 	}
 	return nil
+}
+
+// maxChapters and maxChapterTitle bound what an uploaded file puts into VODReadyNotification.
+// The notification is retried until gocast takes it, so one that gRPC refuses as too large
+// would keep the VOD from ever being reported.
+const (
+	maxChapters     = 200
+	maxChapterTitle = 200
+)
+
+// vodChapters makes chapter marks fit to send. A proto string must be valid UTF-8 or the
+// notification can't be marshalled, and the title comes from the uploader's file.
+func vodChapters(chapters []ffmpeg.Chapter) []*protobuf.Chapter {
+	out := make([]*protobuf.Chapter, 0, min(len(chapters), maxChapters))
+	for _, c := range chapters[:min(len(chapters), maxChapters)] {
+		title := []rune(strings.TrimSpace(strings.ToValidUTF8(c.Title, "\uFFFD")))
+		title = title[:min(len(title), maxChapterTitle)]
+		out = append(out, &protobuf.Chapter{
+			StartSeconds: ptr.Take(uint32(min(max(c.Start, 0), math.MaxUint32))),
+			Title:        ptr.Take(string(title)),
+		})
+	}
+	return out
 }
 
 // needsTranscode reports whether an upload can't be repackaged as is. The container

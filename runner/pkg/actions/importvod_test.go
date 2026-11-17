@@ -2,6 +2,7 @@ package actions
 
 import (
 	"context"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tum-dev/gocast/runner/config"
+	"github.com/tum-dev/gocast/runner/pkg/ffmpeg"
 	"github.com/tum-dev/gocast/runner/pkg/metrics"
 	"github.com/tum-dev/gocast/runner/protobuf"
 )
@@ -251,6 +253,50 @@ func TestImportVODThenThumbnail(t *testing.T) {
 	}
 	if thumb.GetStream().GetId() != 7 || thumb.GetStreamVersion() != protobuf.StreamVersion_STREAM_VERSION_COMBINED {
 		t.Errorf("thumbnail for %v", thumb)
+	}
+}
+
+func TestImportVODChapters(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not available")
+	}
+	meta := filepath.Join(t.TempDir(), "chapters.txt")
+	if err := os.WriteFile(meta, []byte(";FFMETADATA1\n"+
+		"[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=1500\ntitle=Intro\n"+
+		"[CHAPTER]\nTIMEBASE=1/1000\nSTART=1500\nEND=3000\ntitle=Proof\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	upload := makeUpload(t, "up.mp4", "-i", meta, "-map_chapters", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac")
+	config.Config.StoragePath = t.TempDir()
+
+	notify := make(chan *protobuf.Notification, 64)
+	data := map[string]any{"streamID": uint64(7), "streamVersion": "STREAM_VERSION_COMBINED", "uploadPath": upload}
+	if err := ImportVOD(context.Background(), testLogger(), notify, data, testBroker()); err != nil {
+		t.Fatalf("ImportVOD = %v", err)
+	}
+	ns := drain(notify)
+	got := ns[len(ns)-1].GetVodReady().GetChapters()
+	if len(got) != 2 || got[0].GetTitle() != "Intro" || got[0].GetStartSeconds() != 0 ||
+		got[1].GetTitle() != "Proof" || got[1].GetStartSeconds() != 1 {
+		t.Errorf("chapters = %v, want Intro at 0 and Proof at 1", got)
+	}
+}
+
+func TestVODChapters(t *testing.T) {
+	many := make([]ffmpeg.Chapter, maxChapters+1)
+	if got := vodChapters(many); len(got) != maxChapters {
+		t.Errorf("%d chapters sent, want %d", len(got), maxChapters)
+	}
+
+	got := vodChapters([]ffmpeg.Chapter{
+		{Start: -1, Title: "  bad \xff byte "},
+		{Start: 1e12, Title: strings.Repeat("ä", maxChapterTitle+1)},
+	})
+	if got[0].GetStartSeconds() != 0 || got[0].GetTitle() != "bad \uFFFD byte" {
+		t.Errorf("first = %v", got[0])
+	}
+	if got[1].GetStartSeconds() != math.MaxUint32 || got[1].GetTitle() != strings.Repeat("ä", maxChapterTitle) {
+		t.Errorf("second = %v", got[1])
 	}
 }
 

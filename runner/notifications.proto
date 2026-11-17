@@ -51,6 +51,15 @@ message VODReadyNotification {
   StreamInfo stream = 1;
   StreamVersion stream_version = 2;
   string url = 3;
+  // The chapter marks of an uploaded file, in file order. Only an import sets them.
+  repeated Chapter chapters = 4;
+}
+
+// Chapter is a chapter mark of an uploaded file.
+message Chapter {
+  uint32 start_seconds = 1;
+  // As the file has it, which may be empty.
+  string title = 2;
 }
 
 // TranscodingProgressNotification reports how far the conversion of one version of an

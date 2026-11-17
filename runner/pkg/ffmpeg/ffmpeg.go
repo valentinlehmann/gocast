@@ -46,6 +46,21 @@ func (r *FFProbeResult) Container() string {
 	return gjson.Get(r.raw, "format.format_name").String()
 }
 
+// Chapter is a chapter mark of a media file.
+type Chapter struct {
+	Start float64 // seconds
+	Title string
+}
+
+// Chapters returns the chapter marks of an FFProbeResult in file order.
+func (r *FFProbeResult) Chapters() []Chapter {
+	var chapters []Chapter
+	for _, c := range gjson.Get(r.raw, "chapters").Array() {
+		chapters = append(chapters, Chapter{Start: c.Get("start_time").Float(), Title: c.Get("tags.title").String()})
+	}
+	return chapters
+}
+
 // FFProbeResult holds the results of a ffprobe execution
 type FFProbeResult struct {
 	raw string
@@ -56,7 +71,7 @@ func Probe(ctx context.Context, file string) (*FFProbeResult, error) {
 	out, err := exec.CommandContext(ctx, "ffprobe",
 		"-v", "quiet",
 		"-print_format", "json",
-		"-show_format", "-show_streams", file).CombinedOutput()
+		"-show_format", "-show_streams", "-show_chapters", file).CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("execute ffprobe: %w", err)
 	}

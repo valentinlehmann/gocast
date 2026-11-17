@@ -755,6 +755,10 @@ func (m *Manager) handleVODReady(ctx context.Context, notification *protobuf.VOD
 		return nil, err
 	}
 
+	if err := m.importChapters(ctx, stream, notification); err != nil {
+		return nil, err
+	}
+
 	err = m.requestSubtitles(ctx, stream, modelVersion)
 	if err != nil {
 		log.Error("failed to request subtitles", "stream", streamId, "version", modelVersion, "err", err)
